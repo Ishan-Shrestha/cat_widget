@@ -1,0 +1,92 @@
+name: Build Buddy
+
+# Builds a standalone executable for Windows, macOS, and Linux on every
+# push of a version tag (v1.0.0, v1.2.3, etc.), and uploads them as a
+# draft GitHub Release. Can also be triggered manually from the Actions
+# tab (workflow_dispatch) to test a build without cutting a release.
+#
+# Why this exists: PyInstaller doesn't cross-compile — a .exe has to be
+# built BY RUNNING PyInstaller on Windows, a .app BY RUNNING it on
+# macOS. This workflow uses GitHub's free Windows/macOS/Linux runners to
+# do exactly that, so you get all three without owning three computers.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: Buddy-linux
+          - os: windows-latest
+            artifact_name: Buddy-windows
+          - os: macos-latest
+            artifact_name: Buddy-macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Linux only: install libxcb-cursor0 BEFORE building, so PyInstaller
+      # bundles it into the output — without this, the built binary would
+      # need end users to separately `apt install libxcb-cursor0` themselves.
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller buddy.spec --noconfirm
+
+      # macOS: zip the .app bundle so it survives upload as a single file
+      # with permissions/structure intact (raw-folder uploads can mangle
+      # app bundles).
+      - name: Package macOS .app
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent Buddy.app ${{ matrix.artifact_name }}.zip
+
+      - name: Package Windows/Linux build
+        if: matrix.os != 'macos-latest'
+        shell: bash
+        run: |
+          cd dist
+          7z a -tzip ${{ matrix.artifact_name }}.zip Buddy || zip -r ${{ matrix.artifact_name }}.zip Buddy
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}.zip
+          retention-days: 30
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: artifacts/**/*.zip
