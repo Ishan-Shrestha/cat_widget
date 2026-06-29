@@ -61,7 +61,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,            # TODO: add an .ico (Windows) / .icns (macOS) app icon
+    icon='icons/icon.ico',  # Windows .exe icon. Harmless no-op on Linux/macOS — see BUNDLE below for macOS.
 )
 
 coll = COLLECT(
@@ -81,7 +81,7 @@ if sys.platform == 'darwin':
     app = BUNDLE(
         coll,
         name='Buddy.app',
-        icon=None,         # TODO: .icns
+        icon='icons/icon.icns',
         bundle_identifier='com.buddy.app',
         info_plist={
             'LSUIElement': True,  # no Dock icon / app-switcher entry — matches the "just a desktop pet" intent

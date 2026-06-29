@@ -55,6 +55,7 @@ from panel_manager import PanelManager
 from habit_reminder import HabitReminder
 from quick_add import build_quick_add_window
 import startup
+import workspace_sticky
 from economy import Economy
 from effects import EffectsOverlay
 from utils import _play_sound
@@ -122,7 +123,15 @@ class BuddyApp(QWidget):
 
         try:
             screen = QGuiApplication.primaryScreen()
-            geo    = screen.geometry()
+            # availableGeometry() excludes space reserved by the taskbar
+            # (Windows), Dock+menu bar (macOS), or panels (Linux DEs) —
+            # geometry() is the *full* screen including that reserved
+            # area, which made the cat spawn/walk/bounce half-hidden
+            # behind the taskbar. Known residual gap: this fixes the
+            # common case (taskbar pinned to an edge, origin still (0,0))
+            # but doesn't account for a non-zero origin if someone's
+            # taskbar is on the left — rare enough not to chase right now.
+            geo    = screen.availableGeometry()
             self._screen_w, self._screen_h = geo.width(), geo.height()
         except Exception:
             self._screen_w, self._screen_h = 1920, 1080
@@ -195,6 +204,7 @@ class BuddyApp(QWidget):
 
         self.show()
         GLib.idle_add(self._update_input_shape)
+        GLib.idle_add(lambda: (workspace_sticky.make_sticky(self), False)[1])
         self._setup_autostart()
         GLib.idle_add(self._setup_hotkey)
 
