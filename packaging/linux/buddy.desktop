@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Buddy
+Comment=A desktop cat that's also a pomodoro timer, todo list, and habit tracker
+Exec=buddy
+Icon=buddy
+Terminal=false
+Categories=Utility;
+StartupWMClass=Buddy

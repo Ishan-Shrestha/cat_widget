@@ -1,14 +1,21 @@
 name: Build Buddy
 
-# Builds a standalone executable for Windows, macOS, and Linux on every
-# push of a version tag (v1.0.0, v1.2.3, etc.), and uploads them as a
-# draft GitHub Release. Can also be triggered manually from the Actions
-# tab (workflow_dispatch) to test a build without cutting a release.
+# Builds a real installer for each platform on every push of a version
+# tag (v1.0.0, v1.2.3, etc.), and uploads them as a draft GitHub Release.
+# Can also be triggered manually from the Actions tab (workflow_dispatch)
+# to test a build without cutting a release.
 #
-# Why this exists: PyInstaller doesn't cross-compile — a .exe has to be
-# built BY RUNNING PyInstaller on Windows, a .app BY RUNNING it on
-# macOS. This workflow uses GitHub's free Windows/macOS/Linux runners to
-# do exactly that, so you get all three without owning three computers.
+# Why this exists: PyInstaller doesn't cross-compile -- a Windows
+# installer has to be built BY RUNNING on Windows, a macOS .dmg BY
+# RUNNING on macOS. This workflow uses GitHub's free Windows/macOS/Linux
+# runners to do exactly that, so you get all three without owning three
+# computers.
+#
+# Output per platform:
+#   Windows -> Buddy-Setup.exe   (Inno Setup wizard: Start Menu, uninstaller)
+#   macOS   -> Buddy.dmg         (drag-to-Applications)
+#   Linux   -> Buddy-amd64.deb   (apt/dpkg install, shows up in app menus)
+#           -> Buddy.AppImage    (no install needed, runs anywhere)
 
 on:
   push:
@@ -23,11 +30,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: Buddy-linux
+            platform: linux
           - os: windows-latest
-            artifact_name: Buddy-windows
+            platform: windows
           - os: macos-latest
-            artifact_name: Buddy-macos
+            platform: macos
 
     runs-on: ${{ matrix.os }}
 
@@ -38,12 +45,25 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Strips the leading "v" from a tag like v0.1.0 -> 0.1.0, for use
+      # in filenames/version fields. Falls back to 0.0.0 on a manual
+      # workflow_dispatch run, where there's no tag.
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0" >> "$GITHUB_OUTPUT"
+          fi
+
       # Linux only: install libxcb-cursor0 BEFORE building, so PyInstaller
-      # bundles it into the output — without this, the built binary would
+      # bundles it into the output -- without this, the built binary would
       # need end users to separately `apt install libxcb-cursor0` themselves.
       - name: Install Linux system dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 dpkg-dev
 
       - name: Install Python dependencies
         run: |
@@ -54,33 +74,47 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller buddy.spec --noconfirm
 
-      # macOS: zip the .app bundle so it survives upload as a single file
-      # with permissions/structure intact (raw-folder uploads can mangle
-      # app bundles).
-      - name: Package macOS .app
-        if: matrix.os == 'macos-latest'
+      # -- Windows: Inno Setup wizard --
+      - name: Build Windows installer
+        if: matrix.platform == 'windows'
+        shell: pwsh
         run: |
-          cd dist
-          ditto -c -k --sequesterRsrc --keepParent Buddy.app ${{ matrix.artifact_name }}.zip
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DVersion=${{ steps.version.outputs.version }}" `
+            packaging\windows\installer.iss
+          New-Item -ItemType Directory -Force -Path release_output | Out-Null
+          Move-Item dist_installer\Buddy-Setup.exe release_output\Buddy-Setup.exe
 
-      - name: Package Windows/Linux build
-        if: matrix.os != 'macos-latest'
-        shell: bash
+      # -- macOS: .dmg --
+      - name: Build macOS .dmg
+        if: matrix.platform == 'macos'
         run: |
-          cd dist
-          7z a -tzip ${{ matrix.artifact_name }}.zip Buddy || zip -r ${{ matrix.artifact_name }}.zip Buddy
+          mkdir -p release_output
+          hdiutil create -volname Buddy -srcfolder dist/Buddy.app \
+            -ov -format UDZO release_output/Buddy.dmg
+
+      # -- Linux: .deb + AppImage --
+      - name: Build Linux packages
+        if: matrix.platform == 'linux'
+        run: |
+          chmod +x packaging/linux/build.sh
+          bash packaging/linux/build.sh "${{ steps.version.outputs.version }}"
+          mkdir -p release_output
+          mv Buddy-*-amd64.deb release_output/
+          mv Buddy-*-x86_64.AppImage release_output/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.artifact_name }}.zip
+          name: Buddy-${{ matrix.platform }}
+          path: release_output/*
           retention-days: 30
 
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
-      contents: write 
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -91,4 +125,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: artifacts/**/*.zip
+          files: artifacts/**/*

@@ -1,0 +1,10 @@
+Package: buddy
+Version: VERSION_PLACEHOLDER
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Buddy
+Description: A desktop cat that's also a pomodoro timer, todo list, and habit tracker
+ Buddy sits on your screen, reacts when you click or drag it, and opens
+ into a panel for pomodoro sessions, todos, and habit tracking. Earn
+ coins for finishing tasks, lose hearts for missing them.
